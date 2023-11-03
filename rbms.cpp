@@ -36,15 +36,11 @@ int rbms::rbms_send(int* moter) {
     }
     while(_a<15){
         if(_a<7){
-            _canMessage.data[_a] = 0; // CANメッセージのデータにbyte1をセット
-            _a++;
-            _canMessage.data[_a] = 0;
-            _a++;
+            _canMessage.data[_a++] = 0; // CANメッセージのデータにbyte1をセット
+            _canMessage.data[_a++] = 0;
         }else{
-            _canMessage2.data[_a] = 0;
-            _a++;
-            _canMessage2.data[_a] = 0;
-            _a++;
+            _canMessage2.data[_a++] = 0;
+            _canMessage2.data[_a++] = 0;
         } 
     }
     // CANメッセージの送信
