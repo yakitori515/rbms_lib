@@ -1,4 +1,4 @@
-#include "robo_ms.h"
+#include "rbms.h"
 #include "mbed.h"
 rbms::rbms(CAN &can,int moter_num)
     : _can(can),_moter_num(moter_num){
@@ -23,20 +23,28 @@ int rbms::rbms_send(int* moter) {
     _a = 0;
     for(int i=0;i<_moter_num;i++){
         if(i<4){
-            _canMessage.data[_a++] = _byte[_a]; // CANメッセージのデータにbyte1をセット
-            _canMessage.data[_a++] = _byte[_a];
+            _canMessage.data[_a] = _byte[_a]; // CANメッセージのデータにbyte1をセット
+            _a++;
+            _canMessage.data[_a] = _byte[_a];
+            _a++;
         }else{
-            _canMessage2.data[_a++] = _byte[_a]; // CANメッセージのデータにbyte1をセット
-            _canMessage2.data[_a++] = _byte[_a];
+            _canMessage2.data[_a] = _byte[_a]; // CANメッセージのデータにbyte1をセット
+            _a++;
+            _canMessage2.data[_a] = _byte[_a];
+            _a++;
         }
     }
     while(_a<15){
         if(_a<7){
-            _canMessage.data[_a++] = 0; // CANメッセージのデータにbyte1をセット
-            _canMessage.data[_a++] = 0;
+            _canMessage.data[_a] = 0; // CANメッセージのデータにbyte1をセット
+            _a++;
+            _canMessage.data[_a] = 0;
+            _a++;
         }else{
-            _canMessage2.data[_a++] = 0;
-            _canMessage2.data[_a++] = 0;
+            _canMessage2.data[_a] = 0;
+            _a++;
+            _canMessage2.data[_a] = 0;
+            _a++;
         } 
     }
     // CANメッセージの送信
@@ -72,7 +80,9 @@ void rbms::rbms_read(CANMessage &msg, short *rotation,short *speed) {
 
 void rbms::can_read(){
     while(true){
-        if(_can.read(_msg));
+        if(_can.read(_msg)){
+
+        }
     }
 }
 
@@ -89,7 +99,7 @@ float rbms::pid(float T,short rpm_now, short set_speed,float *delta_rpm_pre,floa
 }
 
 void rbms::spd_control(int id,int* set_speed,int* motor){
-    int rotation,speed;
+    short rotation,speed;
     float delta_rpm_pre,ie;
     Timer tm;
     tm.start();
