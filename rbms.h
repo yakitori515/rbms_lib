@@ -6,7 +6,7 @@
 class rbms {
     public:
         rbms(CAN &can,bool motor_type,int moter_num);
-        int rbms_send(int moter[4]);
+        int rbms_send(int* moter);
         void rbms_read(CANMessage &msg, short *rotation,short *speed);
         void can_read();
         float pid(float T,short rpm_now, short set_speed,float *delta_rpm_pre,float *ie,float KP=25,float KI=10, float KD=0);

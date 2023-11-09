@@ -14,7 +14,7 @@ rbms::rbms(CAN &can,bool motor_type,int moter_num)
 }
 
 int rbms::rbms_send(int* motor) {
-    char _byte[_moter_num];
+    char _byte[_moter_num*2];
     int _a=0;
     for(int i=0;i<_moter_num;i++){
         if(motor[i]>=_motor_max)return 0;
@@ -30,19 +30,18 @@ int rbms::rbms_send(int* motor) {
     int _i=0;
     for(int i=0;i<_moter_num;i++){
         if(i<4){
-            _canMessage.data[_a] = _byte[_a]; // CANメッセージのデータにbyte1をセット
+            _canMessage.data[_a] = _byte[_a];
             _a++;
             _canMessage.data[_a] = _byte[_a];
             _a++;
         }else{
-
-            _canMessage2.data[_i++] = _byte[_a++]; // CANメッセージのデータにbyte1をセット
+            _canMessage2.data[_i++] = _byte[_a++];
             _canMessage2.data[_i++] = _byte[_a++];
         }
     }
     while(_a<15){
         if(_a<7){
-            _canMessage.data[_a++] = 0; // CANメッセージのデータにbyte1をセット
+            _canMessage.data[_a++] = 0;
             _canMessage.data[_a++] = 0;
         }else{
             _canMessage2.data[_a++] = 0;
@@ -59,7 +58,6 @@ int rbms::rbms_send(int* motor) {
 }
 
 void rbms::rbms_read(CANMessage &msg, short *rotation,short *speed) {
-            //printf("id:%x\n",msg.id);
             _r = (msg.data[0] << 8) | (msg.data[1] & 0xff);
             _rotation = (float)_r / 8192 * 360;
             *rotation=_rotation;
