@@ -1,19 +1,25 @@
 #include "rbms.h"
 #include "mbed.h"
-rbms::rbms(CAN &can,int moter_num)
-    : _can(can),_moter_num(moter_num){
+rbms::rbms(CAN &can,bool motor_type,int moter_num)
+    : _can(can),_motor_type(motor_type),_moter_num(moter_num){
+    if(_motor_type){
+        _motor_max=16384;
+    }else{
+        _motor_max=10000;
+    }
     if(_moter_num<=8){
         _can.frequency(1000000); // CANのビットレートを指定
         _can.mode(CAN::Normal); // CANのモードをNormalに設定
     }
 }
 
-int rbms::rbms_send(int* moter) {
+int rbms::rbms_send(int* motor) {
     char _byte[_moter_num];
-    
+    int _a=0;
     for(int i=0;i<_moter_num;i++){
-        _byte[_a++] = (char)(moter[i] >> 8); // int値の上位8ビットをcharに変換
-        _byte[_a++] = (char)(moter[i] & 0xFF); // int値の下位8ビットをcharに変換
+        if(motor[i]>=_motor_max)return 0;
+        _byte[_a++] = (char)(motor[i] >> 8); // int値の上位8ビットをcharに変換
+        _byte[_a++] = (char)(motor[i] & 0xFF); // int値の下位8ビットをcharに変換
     }
 
     _canMessage.id = 0x200;
@@ -21,6 +27,7 @@ int rbms::rbms_send(int* moter) {
     _canMessage2.id = 0x1ff;
     _canMessage2.len = 8;
     _a = 0;
+    int _i=0;
     for(int i=0;i<_moter_num;i++){
         if(i<4){
             _canMessage.data[_a] = _byte[_a]; // CANメッセージのデータにbyte1をセット
@@ -28,10 +35,9 @@ int rbms::rbms_send(int* moter) {
             _canMessage.data[_a] = _byte[_a];
             _a++;
         }else{
-            _canMessage2.data[_a] = _byte[_a]; // CANメッセージのデータにbyte1をセット
-            _a++;
-            _canMessage2.data[_a] = _byte[_a];
-            _a++;
+
+            _canMessage2.data[_i++] = _byte[_a++]; // CANメッセージのデータにbyte1をセット
+            _canMessage2.data[_i++] = _byte[_a++];
         }
     }
     while(_a<15){
@@ -49,6 +55,7 @@ int rbms::rbms_send(int* moter) {
     }else{
         return -1;
     }
+
 }
 
 void rbms::rbms_read(CANMessage &msg, short *rotation,short *speed) {
@@ -77,7 +84,6 @@ void rbms::rbms_read(CANMessage &msg, short *rotation,short *speed) {
 void rbms::can_read(){
     while(true){
         if(_can.read(_msg)){
-
         }
     }
 }
@@ -96,15 +102,20 @@ float rbms::pid(float T,short rpm_now, short set_speed,float *delta_rpm_pre,floa
 
 void rbms::spd_control(int id,int* set_speed,int* motor){
     short rotation,speed;
-    float delta_rpm_pre,ie;
+    float delta_rpm_pre=0,ie=0;
     Timer tm;
     tm.start();
     while(1){
-        if(_msg.id==0x1ff+id){
+        if(_msg.id==0x200+id){
             rbms_read(_msg,&rotation,&speed);
-            *motor = (int)pid(tm.read(),speed/19,*set_speed,&delta_rpm_pre,&ie);
+            if(_motor_type){
+                *motor = (int)pid(tm.read(),speed/19,*set_speed,&delta_rpm_pre,&ie);
+            }else{
+                *motor = (int)pid(tm.read(),speed/36,*set_speed,&delta_rpm_pre,&ie,17,8);
+            }
             tm.reset();
-            if(*motor>16384){*motor=16384;}else if(*motor<-16384){*motor=-16384;}
+            if(*motor>_motor_max){*motor=_motor_max;}else if(*motor<-_motor_max){*motor=-_motor_max;}
         }
+        ThisThread::sleep_for(3ms);
     }
 }

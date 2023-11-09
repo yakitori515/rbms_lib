@@ -5,7 +5,7 @@
 
 class rbms {
     public:
-        rbms(CAN &can,int moter_num);
+        rbms(CAN &can,bool motor_type,int moter_num);
         int rbms_send(int moter[4]);
         void rbms_read(CANMessage &msg, short *rotation,short *speed);
         void can_read();
@@ -16,9 +16,9 @@ class rbms {
 
         CANMessage _canMessage,_canMessage2,_msg;
         CAN &_can;
-        int _moter_num;
+        bool _motor_type;//if 0 m2006,if 1 m3508
+        int _moter_num,_motor_max;
         unsigned short _r;
-        int _a = 0;
         int _rotation;
         int _speed;
         int _torque;
