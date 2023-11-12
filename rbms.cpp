@@ -7,7 +7,7 @@ rbms::rbms(CAN &can,bool motor_type,int motor_num)
     }else{
         _motor_max=10000;
     }
-    if(_moter_num<=8){
+    if(_motor_num<=8){
         _can.frequency(1000000); // CANのビットレートを指定
         _can.mode(CAN::Normal); // CANのモードをNormalに設定
     }
@@ -100,9 +100,11 @@ float rbms::pid(float T,short rpm_now, short set_speed,float *delta_rpm_pre,floa
 
 void rbms::spd_control(int* set_speed,int* motor){
     short rotation[_motor_num],speed[_motor_num];
-    float delta_rpm_pre[_motor_num]={0},ie[_motor_num]={0};
+    float delta_rpm_pre[_motor_num],ie[_motor_num];
     Timer tm[_motor_num];
-    for(int i=0;i<_motor_num;i++){
+    for(int i=0;i<_motor_num;i++){//初期化
+        delta_rpm_pre[i]=0.0;
+        ie[i]=0.0;
         tm[i].start();
     }
     
