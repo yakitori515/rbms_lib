@@ -1,7 +1,7 @@
 #include "rbms.h"
 #include "mbed.h"
-rbms::rbms(CAN &can,bool motor_type,int moter_num)
-    : _can(can),_motor_type(motor_type),_moter_num(moter_num){
+rbms::rbms(CAN &can,bool motor_type,int motor_num)
+    : _can(can),_motor_type(motor_type),_motor_num(motor_num){
     if(_motor_type){
         _motor_max=16384;
     }else{
@@ -14,9 +14,9 @@ rbms::rbms(CAN &can,bool motor_type,int moter_num)
 }
 
 int rbms::rbms_send(int* motor) {
-    char _byte[_moter_num*2];
+    char _byte[_motor_num*2];
     int _a=0;
-    for(int i=0;i<_moter_num;i++){
+    for(int i=0;i<_motor_num;i++){
         if(motor[i]>=_motor_max)return 0;
         _byte[_a++] = (char)(motor[i] >> 8); // int値の上位8ビットをcharに変換
         _byte[_a++] = (char)(motor[i] & 0xFF); // int値の下位8ビットをcharに変換
@@ -28,7 +28,7 @@ int rbms::rbms_send(int* motor) {
     _canMessage2.len = 8;
     _a = 0;
     int _i=0;
-    for(int i=0;i<_moter_num;i++){
+    for(int i=0;i<_motor_num;i++){
         if(i<4){
             _canMessage.data[_a] = _byte[_a];
             _a++;
@@ -98,22 +98,27 @@ float rbms::pid(float T,short rpm_now, short set_speed,float *delta_rpm_pre,floa
     return out_torque;
 }
 
-void rbms::spd_control(int id,int* set_speed,int* motor){
-    short rotation,speed;
-    float delta_rpm_pre=0,ie=0;
-    Timer tm;
-    tm.start();
+void rbms::spd_control(int* set_speed,int* motor){
+    short rotation[_motor_num],speed[_motor_num];
+    float delta_rpm_pre[_motor_num]={0},ie[_motor_num]={0};
+    Timer tm[_motor_num];
+    for(int i=0;i<_motor_num;i++){
+        tm[i].start();
+    }
+    
     while(1){
-        if(_msg.id==0x200+id){
-            rbms_read(_msg,&rotation,&speed);
-            if(_motor_type){
-                *motor = (int)pid(tm.read(),speed/19,*set_speed,&delta_rpm_pre,&ie);
-            }else{
-                *motor = (int)pid(tm.read(),speed/36,*set_speed,&delta_rpm_pre,&ie,17,8);
+        for(int id=0;id<_motor_num;id++){
+            if(_msg.id==0x201+id){
+                rbms_read(_msg,&rotation[id],&speed[id]);
+                if(_motor_type){
+                    motor[id] = (int)pid(tm[id].read(),speed[id]/19,set_speed[id],&delta_rpm_pre[id],&ie[id]);
+                }else{
+                    motor[id] = (int)pid(tm[id].read(),speed[id]/36,set_speed[id],&delta_rpm_pre[id],&ie[id],17,8);
+                }
+                tm[id].reset();
+                if(motor[id]>_motor_max){motor[id]=_motor_max;}else if(motor[id]<-_motor_max){motor[id]=-_motor_max;}
             }
-            tm.reset();
-            if(*motor>_motor_max){*motor=_motor_max;}else if(*motor<-_motor_max){*motor=-_motor_max;}
         }
-        ThisThread::sleep_for(3ms);
+        ThisThread::sleep_for(10ms);
     }
 }
