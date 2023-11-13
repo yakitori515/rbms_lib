@@ -111,7 +111,8 @@ void rbms::spd_control(int* set_speed,int* motor){
     while(1){
         for(int id=0;id<_motor_num;id++){
             if(_msg.id==0x201+id){
-                rbms_read(_msg,&rotation[id],&speed[id]);
+                CANMessage msg=_msg;
+                rbms_read(msg,&rotation[id],&speed[id]);
                 if(_motor_type){
                     motor[id] = (int)pid(tm[id].read(),speed[id]/19,set_speed[id],&delta_rpm_pre[id],&ie[id]);
                 }else{
@@ -121,6 +122,6 @@ void rbms::spd_control(int* set_speed,int* motor){
                 if(motor[id]>_motor_max){motor[id]=_motor_max;}else if(motor[id]<-_motor_max){motor[id]=-_motor_max;}
             }
         }
-        ThisThread::sleep_for(10ms);
+        ThisThread::sleep_for(3ms);
     }
 }
