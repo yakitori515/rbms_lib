@@ -17,7 +17,7 @@ int rbms::rbms_send(int* motor) {//motorへ制御信号を送信する関数
     char _byte[_motor_num*2];//byteデータ変換用
     int _a=0;
     for(int i=0;i<_motor_num;i++){  //int dataを2byteに分割
-        if(motor[i]>=_motor_max)return 0;//入力値がmotor上限以上の場合return0
+        if(motor[i]>_motor_max)return 0;//入力値がmotor上限以上の場合return0
         _byte[_a++] = (char)(motor[i] >> 8); // int値の上位8ビットをcharに変換
         _byte[_a++] = (char)(motor[i] & 0xFF); // int値の下位8ビットをcharに変換
     }
