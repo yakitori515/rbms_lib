@@ -3,9 +3,9 @@
 rbms::rbms(CAN &can,bool motor_type,int motor_num)
     : _can(can),_motor_type(motor_type),_motor_num(motor_num){
     if(_motor_type){
-        _motor_max=16384;//m3508
+        _motor_max=16384;//トルク
     }else{
-        _motor_max=10000;//m2006
+        _motor_max=25000;//電圧
     }
     if(_motor_num<=8){
         _can.frequency(1000000); // CANのビットレートを指定
@@ -22,7 +22,7 @@ int rbms::rbms_send(int* motor) {//motorへ制御信号を送信する関数
         _byte[_a++] = (char)(motor[i] & 0xFF); // int値の下位8ビットをcharに変換
     }
 
-    _canMessage.id = 0x200;//esc id1~4のcanの送信id
+    _canMessage.id = 0x1fe;//esc id1~4のcanの送信id
     _canMessage.len = 8;//can data長(8byte固定)
     _canMessage2.id = 0x1ff;//esc id5~8のcanの送信id
     _canMessage2.len = 8;
@@ -110,7 +110,7 @@ void rbms::spd_control(int* set_speed,int* motor){//速度制御用関数
     
     while(1){
         for(int id=0;id<_motor_num;id++){
-            if(_msg.id==0x201+id){//esc idごとに受信データ割り振り
+            if(_msg.id==0x205+id){//esc idごとに受信データ割り振り
                 CANMessage msg=_msg;
                 rbms_read(msg,&rotation[id],&speed[id]);//data変換
                 if(_motor_type){
