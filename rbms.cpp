@@ -59,7 +59,7 @@ int rbms::rbms_send(int* motor) {//motorへ制御信号を送信する関数
 
 void rbms::rbms_read(CANMessage &msg, short *rotation,short *speed) {//motorからの受信データを変換する関数
             _r = (msg.data[0] << 8) | (msg.data[1] & 0xff);//2byteに分割されているdataを結合
-            _rotation = (float)_r / 8192 * 360;//8192=360°
+            _rotation = (float)_r / 8191 * 360;//8192=360°
             *rotation=_rotation;
  
             _speed = (msg.data[2] << 8) | (msg.data[3] & 0xff);
