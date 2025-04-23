@@ -22,9 +22,9 @@ int rbms::rbms_send(int* motor) {//motorへ制御信号を送信する関数
         _byte[_a++] = (char)(motor[i] & 0xFF); // int値の下位8ビットをcharに変換
     }
 
-    _canMessage.id = 0x1fe;//esc id1~4のcanの送信id
+    _canMessage.id = 0x1ff;//esc id1~4のcanの送信id
     _canMessage.len = 8;//can data長(8byte固定)
-    _canMessage2.id = 0x1ff;//esc id5~8のcanの送信id
+    _canMessage2.id = 0x2ff;//esc id5~8のcanの送信id
     _canMessage2.len = 8;
     _a = 0;
     int _i=0;
