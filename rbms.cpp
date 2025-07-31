@@ -18,6 +18,25 @@ rbms::rbms(CAN &can,bool* motor_type,int motor_num)
     }
 }
 
+rbms::rbms(CAN &can,bool motor_type,int motor_num): _can(can),_motor_num(motor_num){//未確認
+    _motor_max=(int*)malloc(sizeof(int)*_motor_num);
+    _motor_type=(bool*)malloc(sizeof(bool)*_motor_num);
+    for(int i=0;i<_motor_num;i++){
+        _motor_type[i]= motor_type;
+        if(_motor_type[i]){
+            _motor_max[i]=16384;//m3508
+        }else{
+            _motor_max[i]=10000;//m2006
+        }
+    }
+    if(_motor_num<=8){
+        _can.frequency(1000000); // CANのビットレートを指定
+        _can.mode(CAN::Normal); // CANのモードをNormalに設定
+    }
+}
+
+
+
 int rbms::rbms_send(int* motor) {//motorへ制御信号を送信する関数
     char _byte[_motor_num*2];//byteデータ変換用
     int _a=0;
