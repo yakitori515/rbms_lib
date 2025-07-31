@@ -6,6 +6,7 @@
 class rbms {
     public:
         rbms(CAN &can,bool* motor_type,int motor_num);
+        rbms(CAN &can,bool motor_type,int motor_num);
         int rbms_send(int* moter);
         void rbms_read(CANMessage &msg, short *rotation,short *speed);
         void can_read();
