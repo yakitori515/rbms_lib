@@ -105,7 +105,6 @@ void rbms::control_thread_entry() {
                     final_out = target_t;
                 }
 
-                // 上限ガード
                 if (final_out > _motor_max) final_out = _motor_max;
                 else if (final_out < -_motor_max) final_out = -_motor_max;
 
