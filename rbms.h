@@ -4,7 +4,7 @@
 #include "mbed.h"
 #include "CANManager.h"
 
-class rbms : public CANManager{
+class rbms : public CANReceiver{
     public:
         enum ControlMode {
             SPD_MODE,
@@ -62,7 +62,7 @@ class rbms : public CANManager{
         int _target_torques[8];
         int _output_torques[8];
         float _kp, _ki, _kd;
-        
+
         Thread _thread;
         Mutex _data_mutex;
         EventFlags _event_flags;

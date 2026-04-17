@@ -135,26 +135,11 @@ int rbms::rbms_send() {
     return (_can.write(_tx_msg_low) && (_motor_num > 4 ? _can.write(_tx_msg_high) : true)) ? 1 : -1;
 }
 
-void rbms::rbms_read(CANMessage &msg, short *rotation,short *speed) {//motorからの受信データを変換する関数
-            _r = (msg.data[0] << 8) | (msg.data[1] & 0xff);//2byteに分割されているdataを結合
-            _rotation = (float)_r / 8192 * 360;//8192=360°
-            *rotation=_rotation;
- 
-            _speed = (msg.data[2] << 8) | (msg.data[3] & 0xff);
-            if (_speed & 0b1000000000000000){//マイナス値の場合(最上位ビットが1のとき)(2の補数)
-                _speed--;
-                _speed = -~_speed;
-            }
-            *speed=_speed;
 
-            _torque = (msg.data[4] << 8) | (msg.data[5] & 0xff);
-            if (_torque & 0b1000000000000000){
-                _torque--;
-                _torque = -~_torque;
-            }
-
-            _temperature = msg.data[6];
-            
+void rbms::parse_can_data(const CANMessage &msg, short *rotation, short *speed) {
+    unsigned short r = (msg.data[0] << 8) | (msg.data[1] & 0xff);
+    *rotation = (short)((float)r / 8192.0f * 360.0f);
+    *speed = (int16_t)((msg.data[2] << 8) | (msg.data[3] & 0xff));
 }
 
 bool rbms::handle_message(const CANMessage &msg) {
