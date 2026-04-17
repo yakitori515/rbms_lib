@@ -2,10 +2,21 @@
 #include "mbed.h"
 rbms::rbms(CAN &can,bool motor_type,int motor_num)
     : _can(can),_motor_type(motor_type),_motor_num(motor_num){
-    if(_motor_type){
-        _motor_max=16384;//m3508
-    }else{
-        _motor_max=10000;//m2006
+    if (_motor_type) { // M3508
+        _kp = 25.0f; _ki = 10.0f; _kd = 0.0f;
+        _motor_max = 16384;
+    } else { // M2006
+        _kp = 15.0f; _ki = 6.0f; _kd = 0.0f;
+        _motor_max = 10000;
+    }
+    for(int i = 0; i < 8; i++) {
+        _control_modes[i] = SPD_MODE;
+        _target_speeds[i] = 0;
+        _target_torques[i] = 0;
+        _output_torques[i] = 0;
+        _pid_states[i].prev_err = 0.0f;
+        _pid_states[i].integral = 0.0f;
+        _pid_states[i].timer.start();
     }
     if(_motor_num<=8){
         _can.frequency(1000000); // CANのビットレートを指定
@@ -13,48 +24,115 @@ rbms::rbms(CAN &can,bool motor_type,int motor_num)
     }
 }
 
-int rbms::rbms_send(int* motor) {//motorへ制御信号を送信する関数
-    char _byte[_motor_num*2];//byteデータ変換用
-    int _a=0;
-    for(int i=0;i<_motor_num;i++){  //int dataを2byteに分割
-        if(motor[i]>_motor_max)return 0;//入力値がmotor上限以上の場合return0
-        _byte[_a++] = (char)(motor[i] >> 8); // int値の上位8ビットをcharに変換
-        _byte[_a++] = (char)(motor[i] & 0xFF); // int値の下位8ビットをcharに変換
-    }
+void rbms::set_control_mode(int id, ControlMode mode) {
+    if (id < 0 || id >= _motor_num) return;
+    _data_mutex.lock();
+    _control_modes[id] = mode;
+    _pid_states[id].integral = 0;
+    _pid_states[id].prev_err = 0;
+    _data_mutex.unlock();
+}
 
-    _canMessage.id = 0x200;//esc id1~4のcanの送信id
-    _canMessage.len = 8;//can data長(8byte固定)
-    _canMessage2.id = 0x1ff;//esc id5~8のcanの送信id
-    _canMessage2.len = 8;
-    _a = 0;
-    int _i=0;
-    for(int i=0;i<_motor_num;i++){//canmessageにbyte dataをセット
-        if(i<4){
-            _canMessage.data[_a] = _byte[_a];
-            _a++;
-            _canMessage.data[_a] = _byte[_a];
-            _a++;
-        }else{
-            _canMessage2.data[_i++] = _byte[_a++];
-            _canMessage2.data[_i++] = _byte[_a++];
+void rbms::set_target_speed(int id, int speed) {
+    if (id < 0 || id >= _motor_num) return;
+    _data_mutex.lock();
+    _target_speeds[id] = speed;
+    _data_mutex.unlock();
+}
+
+void rbms::set_target_torque(int id, int torque) {
+    if (id < 0 || id >= _motor_num) return;
+    _data_mutex.lock();
+    _target_torques[id] = torque;
+    _data_mutex.unlock();
+}
+
+void rbms::set_pid_gains(float kp, float ki, float kd) {
+    _data_mutex.lock();
+    _kp = kp;
+    _ki = ki;
+    _kd = kd;
+    _data_mutex.unlock();
+}
+
+float rbms::pid_calculate(int id, float target, float current, float dt) {
+    float error = target - current;
+    _pid_states[id].integral += (error + _pid_states[id].prev_err) * dt / 2.0f;
+    float derivative = (error - _pid_states[id].prev_err) / dt;
+    float out = (_kp * error) + (_ki * _pid_states[id].integral) + (_kd * derivative);
+    _pid_states[id].prev_err = error;
+    return out;
+}
+
+void rbms::spd_control() {
+    _thread.start(callback(this, &rbms::control_thread_entry));
+}
+
+void rbms::control_thread_entry() {
+    while (true) {
+        _event_flags.wait_any(0x01); 
+
+        for (int id = 0; id < _motor_num; id++) {
+            CANMessage local_msg;
+            bool has_new = false;
+            ControlMode mode;
+            int target_s, target_t;
+
+            _data_mutex.lock();
+            if (_new_data_mask & (1 << id)) {
+                local_msg = _msg_buffer[id];
+                _new_data_mask &= ~(1 << id);
+                has_new = true;
+            }
+            mode = _control_modes[id];
+            target_s = _target_speeds[id];
+            target_t = _target_torques[id];
+            _data_mutex.unlock();
+
+            if (has_new) {
+                short rot, raw_spd;
+                parse_can_data(local_msg, &rot, &raw_spd);
+                
+                int final_out = 0;
+
+                if (mode == SPD_MODE) {
+                    float dt = _pid_states[id].timer.read();
+                    _pid_states[id].timer.reset();
+                    if (dt <= 0) dt = 0.001f;
+                    float current_rpm = _motor_type ? (raw_spd / 19.0f) : (raw_spd / 36.0f);
+                    final_out = (int)pid_calculate(id, (float)target_s, current_rpm, dt);
+                } else {
+                    final_out = target_t;
+                }
+
+                // 上限ガード
+                if (final_out > _motor_max) final_out = _motor_max;
+                else if (final_out < -_motor_max) final_out = -_motor_max;
+
+                _data_mutex.lock();
+                _output_torques[id] = final_out;
+                _data_mutex.unlock();
+            }
         }
     }
-    while(_a<15){//あまりのcanmassage.dataに0を代入(NULL値を残さない)
-        if(_a<7){
-            _canMessage.data[_a++] = 0;
-            _canMessage.data[_a++] = 0;
-        }else{
-            _canMessage2.data[_a++] = 0;
-            _canMessage2.data[_a++] = 0;
-        } 
-    }
-    // CANメッセージの送信
-    if (_can.write(_canMessage)&&_can.write(_canMessage2)) {
-        return 1;
-    }else{
-        return -1;
-    }
+}
 
+int rbms::rbms_send() {
+    _tx_msg_low.id = 0x200; _tx_msg_low.len = 8;
+    _tx_msg_high.id = 0x1ff; _tx_msg_high.len = 8;
+    _data_mutex.lock();
+    for(int i = 0; i < _motor_num; i++) {
+        int val = _output_torques[i];
+        if (i < 4) {
+            _tx_msg_low.data[i*2] = (char)(val >> 8);
+            _tx_msg_low.data[i*2+1] = (char)(val & 0xFF);
+        } else {
+            _tx_msg_high.data[(i-4)*2] = (char)(val >> 8);
+            _tx_msg_high.data[(i-4)*2+1] = (char)(val & 0xFF);
+        }
+    }
+    _data_mutex.unlock();
+    return (_can.write(_tx_msg_low) && (_motor_num > 4 ? _can.write(_tx_msg_high) : true)) ? 1 : -1;
 }
 
 void rbms::rbms_read(CANMessage &msg, short *rotation,short *speed) {//motorからの受信データを変換する関数
@@ -80,49 +158,14 @@ void rbms::rbms_read(CANMessage &msg, short *rotation,short *speed) {//motorか�
 }
 
 bool rbms::handle_message(const CANMessage &msg) {
-    if (msg.id >= 0x201 && msg.id < (0x201 + _motor_num)) {
-        _msg = msg; 
-        return true; // 処理済み
+    int id_idx = msg.id - 0x201;
+    if (id_idx >= 0 && id_idx < _motor_num) {
+        _data_mutex.lock();
+        _msg_buffer[id_idx] = msg;
+        _new_data_mask |= (1 << id_idx);
+        _data_mutex.unlock();
+        _event_flags.set(0x01); 
+        return true;
     }
-    return false; // 自分に関係ないID
-}
-
-float rbms::pid(float T,short rpm_now, short set_speed,float *delta_rpm_pre,float *ie,float KP, float KI,float KD )//pid制御
-{
-    float de;
-    float delta_rpm;
-    delta_rpm  = set_speed - rpm_now;
-    de = (delta_rpm - *delta_rpm_pre)/T;
-    *ie = *ie + (delta_rpm + *delta_rpm_pre)*T/2;
-    float out_torque  = KP*delta_rpm + KI*(*ie) + KD*de;
-    *delta_rpm_pre = delta_rpm;
-    return out_torque;
-}
-
-void rbms::spd_control(int* set_speed,int* motor){//速度制御用関数
-    short rotation[_motor_num],speed[_motor_num];
-    float delta_rpm_pre[_motor_num],ie[_motor_num];
-    Timer tm[_motor_num];//タイマーインスタンス生成(配列ではない)
-    for(int i=0;i<_motor_num;i++){//初期化
-        delta_rpm_pre[i]=0.0;
-        ie[i]=0.0;
-        tm[i].start();
-    }
-    
-    while(1){
-        for(int id=0;id<_motor_num;id++){
-            if(_msg.id==0x201+id){//esc idごとに受信データ割り振り
-                CANMessage msg=_msg;
-                rbms_read(msg,&rotation[id],&speed[id]);//data変換
-                if(_motor_type){
-                    motor[id] = (int)pid(tm[id].read(),speed[id]/19,set_speed[id],&delta_rpm_pre[id],&ie[id]);
-                }else{
-                    motor[id] = (int)pid(tm[id].read(),speed[id]/36,set_speed[id],&delta_rpm_pre[id],&ie[id],15,6);
-                }
-                tm[id].reset();//timer reset
-                if(motor[id]>_motor_max){motor[id]=_motor_max;}else if(motor[id]<-_motor_max){motor[id]=-_motor_max;}//上限確認超えてた場合は上限値にset
-            }
-        }
-        ThisThread::sleep_for(3ms);
-    }
+    return false;
 }
