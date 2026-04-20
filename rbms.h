@@ -8,7 +8,8 @@ class rbms : public CANReceiver{
     public:
         enum ControlMode {
             SPD_MODE,
-            TRQ_MODE
+            TRQ_MODE,
+            POS_MODE // 【追加】角度（位置）制御モード
         };
 
         rbms(CAN &can,bool motor_type,int motor_num);
@@ -16,7 +17,7 @@ class rbms : public CANReceiver{
         /**
          * @brief 指定したモーターの制御モードを切り替え
          * @param id モーターインデックス (0 ~ motor_num-1)
-         * @param mode SPD_MODE または TRQ_MODE
+         * @param mode SPD_MODE, TRQ_MODE, または POS_MODE
          */
         void set_control_mode(int id, ControlMode mode);
 
@@ -33,13 +34,23 @@ class rbms : public CANReceiver{
          * @param torque 出力トルク値 (M2006:±10000, M3508:±16384)
          */
         void set_target_torque(int id, int torque);
+
+        // 【追加】角度制御時の目標角度を設定（単位：度）
+        void set_target_angle(int id, float angle);
+
+        // 【追加】現在のエンコーダー角度を 0度 としてリセットする
+        void reset_angle(int id);
+
         /**
-         * @brief PIDゲイン設定
+         * @brief 速度制御用PIDゲイン設定
          * @param kp 比例ゲイン
          * @param ki 積分ゲイン
          * @param kd 微分ゲイン
          */
         void set_pid_gains(float kp, float ki, float kd);
+
+        // 【追加】角度制御用（外側ループ）PIDゲイン設定
+        void set_pos_pid_gains(float kp, float ki, float kd);
         
         bool handle_message(const CANMessage &msg) override;
         void spd_control();
@@ -50,7 +61,8 @@ class rbms : public CANReceiver{
 
         void control_thread_entry();
         float pid_calculate(int id, float target, float current, float dt);
-        void parse_can_data(const CANMessage &msg, short *rotation, short *speed);
+        float pos_pid_calculate(int id, float target, float current, float dt);
+        void parse_can_data(int id, const CANMessage &msg, short *rotation, short *speed);
 
         CAN &_can;
         bool _motor_type;
@@ -60,16 +72,30 @@ class rbms : public CANReceiver{
         ControlMode _control_modes[8];
         int _target_speeds[8];
         int _target_torques[8];
+        float _target_angles[8];
         int _output_torques[8];
-        float _kp, _ki, _kd;
+        
+        // ゲイン
+        float _kp, _ki, _kd;             // 速度ループ用
+        float _kp_p, _ki_p, _kd_p;       // 位置ループ用
 
         Thread _thread;
         Mutex _data_mutex;
         EventFlags _event_flags;
 
         struct PIDState {
+            // 速度ループ用状態
             float prev_err;
             float integral;
+            
+            // 位置ループ用状態
+            float pos_prev_err;
+            float pos_integral;
+            
+            uint16_t last_raw_angle;   // 前回の生エンコーダー値 (0-8191)
+            float accumulated_angle;   // 出力軸の累積角度 (度)
+            bool is_initialized;       // 初期化フラグ
+
             Timer timer;
         } _pid_states[8];
 
@@ -77,9 +103,6 @@ class rbms : public CANReceiver{
         CANMessage _msg_buffer[8];
         uint8_t _new_data_mask;
 
-
-
 };
-
 
 #endif
