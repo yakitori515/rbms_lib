@@ -112,7 +112,7 @@ void rbms::control_thread_entry() {
                         _pid_states[id].prev_err = 0.0f;
                     }
                     float current_rpm = _motor_type ? (raw_spd / 19.0f) : (raw_spd / 36.0f);
-                    printf(">speed:%f\n",current_rpm);
+                    //printf(">speed:%f\n",current_rpm);
                     final_out = (int)pid_calculate(id, (float)target_s, current_rpm, dt);
                 } else {
                     final_out = target_t;
