@@ -3,10 +3,10 @@
 rbms::rbms(CAN &can,bool motor_type,int motor_num)
     : _can(can),_motor_type(motor_type),_motor_num(motor_num){
     if (_motor_type) { // M3508
-        _kp = 25.0f; _ki = 10.0f; _kd = 0.0f;
+        _kp = 35.0f; _ki = 50.0f; _kd = 0.0f;
         _motor_max = 16384;
     } else { // M2006
-        _kp = 15.0f; _ki = 6.0f; _kd = 0.0f;
+        _kp = 15.0f; _ki = 12.0f; _kd = 0.0f;
         _motor_max = 10000;
     }
     for(int i = 0; i < 8; i++) {
@@ -19,8 +19,8 @@ rbms::rbms(CAN &can,bool motor_type,int motor_num)
         _pid_states[i].timer.start();
     }
     if(_motor_num<=8){
-        _can.frequency(1000000); // CANのビットレートを指定
-        _can.mode(CAN::Normal); // CANのモードをNormalに設定
+        _can.frequency(1000000);
+        _can.mode(CAN::Normal);
     }
 }
 
@@ -58,6 +58,14 @@ void rbms::set_pid_gains(float kp, float ki, float kd) {
 float rbms::pid_calculate(int id, float target, float current, float dt) {
     float error = target - current;
     _pid_states[id].integral += (error + _pid_states[id].prev_err) * dt / 2.0f;
+
+    float integral_limit = _motor_max / (_ki > 0.0f ? _ki : 1.0f); 
+    if (_pid_states[id].integral > integral_limit) {
+        _pid_states[id].integral = integral_limit;
+    } else if (_pid_states[id].integral < -integral_limit) {
+        _pid_states[id].integral = -integral_limit;
+    }
+
     float derivative = (error - _pid_states[id].prev_err) / dt;
     float out = (_kp * error) + (_ki * _pid_states[id].integral) + (_kd * derivative);
     _pid_states[id].prev_err = error;
@@ -97,9 +105,14 @@ void rbms::control_thread_entry() {
 
                 if (mode == SPD_MODE) {
                     float dt = _pid_states[id].timer.read();
-                    _pid_states[id].timer.reset();
-                    if (dt <= 0) dt = 0.001f;
+                    _pid_states[id].timer.reset();                    
+                    if (dt <= 0.0f || dt > 0.05f) {
+                        dt = 0.001f;
+                        _pid_states[id].integral = 0.0f;
+                        _pid_states[id].prev_err = 0.0f;
+                    }
                     float current_rpm = _motor_type ? (raw_spd / 19.0f) : (raw_spd / 36.0f);
+                    printf(">speed:%f\n",current_rpm);
                     final_out = (int)pid_calculate(id, (float)target_s, current_rpm, dt);
                 } else {
                     final_out = target_t;
