@@ -9,7 +9,7 @@ class rbms : public CANReceiver{
         enum ControlMode {
             SPD_MODE,
             TRQ_MODE,
-            POS_MODE // 【追加】角度（位置）制御モード
+            POS_MODE
         };
 
         rbms(CAN &can,bool motor_type,int motor_num);
@@ -35,10 +35,10 @@ class rbms : public CANReceiver{
          */
         void set_target_torque(int id, int torque);
 
-        // 【追加】角度制御時の目標角度を設定（単位：度）
+        //角度制御時の目標角度を設定（単位：度）
         void set_target_angle(int id, float angle);
 
-        // 【追加】現在のエンコーダー角度を 0度 としてリセットする
+        //現在のエンコーダー角度を 0度 としてリセットする
         void reset_angle(int id);
 
         /**
@@ -48,10 +48,13 @@ class rbms : public CANReceiver{
          * @param kd 微分ゲイン
          */
         void set_pid_gains(float kp, float ki, float kd);
-
-        // 【追加】角度制御用（外側ループ）PIDゲイン設定
+        // 角度制御用（外側ループ）PIDゲイン設定
         void set_pos_pid_gains(float kp, float ki, float kd);
-        
+        // max_speed: 最大RPM (0.0fを指定するとデフォルト動作に戻る)
+        void set_speed_limit(int id, float max_speed);
+        // max_accel: 1秒間あたりの最大RPM変化量 (0.0fを指定すると制限なし)
+        void set_accel_limit(int id, float max_accel);
+
         bool handle_message(const CANMessage &msg) override;
         void spd_control();
         int rbms_send();
@@ -61,7 +64,7 @@ class rbms : public CANReceiver{
 
         void control_thread_entry();
         float pid_calculate(int id, float target, float current, float dt);
-        float pos_pid_calculate(int id, float target, float current, float dt);
+        float pos_pid_calculate(int id, float target, float current, float dt, float limit);
         void parse_can_data(int id, const CANMessage &msg, short *rotation, short *speed);
 
         CAN &_can;
@@ -95,6 +98,10 @@ class rbms : public CANReceiver{
             uint16_t last_raw_angle;   // 前回の生エンコーダー値 (0-8191)
             float accumulated_angle;   // 出力軸の累積角度 (度)
             bool is_initialized;       // 初期化フラグ
+
+            float speed_limit_rpm;     // 設定値 (0ならデフォルト動作)
+            float accel_limit_rpm_s;   // 設定値 (0なら制限なし)
+            float current_target_rpm;  // スルーレート計算用の中間目標速度
 
             Timer timer;
         } _pid_states[8];

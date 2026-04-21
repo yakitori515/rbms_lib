@@ -1,32 +1,36 @@
 #include "rbms.h"
 #include "mbed.h"
+#include <cmath>
 
 rbms::rbms(CAN &can,bool motor_type,int motor_num)
     : _can(can),_motor_type(motor_type),_motor_num(motor_num){
     if (_motor_type) { // M3508
         _kp = 35.0f; _ki = 50.0f; _kd = 0.0f;
-        _kp_p = 5.0f; _ki_p = 0.0f; _kd_p = 0.15f; // 【追加】位置ループの初期ゲイン
+        _kp_p = 5.0f; _ki_p = 0.0f; _kd_p = 0.15f;
         _motor_max = 16384;
     } else { // M2006
         _kp = 15.0f; _ki = 12.0f; _kd = 0.0f;
-        _kp_p = 7.0f; _ki_p = 0.0f; _kd_p = 0.3f; // 【追加】位置ループの初期ゲイン
+        _kp_p = 4.5f; _ki_p = 0.0f; _kd_p = 0.25f;
         _motor_max = 10000;
     }
     for(int i = 0; i < 8; i++) {
         _control_modes[i] = SPD_MODE;
         _target_speeds[i] = 0;
         _target_torques[i] = 0;
-        _target_angles[i] = 0.0f; // 【追加】
+        _target_angles[i] = 0.0f;
         _output_torques[i] = 0;
         
-        // 状態の初期化
         _pid_states[i].prev_err = 0.0f;
         _pid_states[i].integral = 0.0f;
-        _pid_states[i].pos_prev_err = 0.0f; // 【追加】
-        _pid_states[i].pos_integral = 0.0f; // 【追加】
-        _pid_states[i].last_raw_angle = 0;  // 【追加】
-        _pid_states[i].accumulated_angle = 0.0f; // 【追加】
-        _pid_states[i].is_initialized = false; // 【追加】
+        _pid_states[i].pos_prev_err = 0.0f;
+        _pid_states[i].pos_integral = 0.0f;
+        _pid_states[i].last_raw_angle = 0;
+        _pid_states[i].accumulated_angle = 0.0f;
+        _pid_states[i].is_initialized = false;
+
+        _pid_states[i].speed_limit_rpm = 0.0f;
+        _pid_states[i].accel_limit_rpm_s = 0.0f;
+        _pid_states[i].current_target_rpm = 0.0f;
         
         _pid_states[i].timer.start();
     }
@@ -40,11 +44,10 @@ void rbms::set_control_mode(int id, ControlMode mode) {
     if (id < 0 || id >= _motor_num) return;
     _data_mutex.lock();
     _control_modes[id] = mode;
-    // モード切替時に全ての積分項と偏差をリセットし暴走を防ぐ
     _pid_states[id].integral = 0;
     _pid_states[id].prev_err = 0;
-    _pid_states[id].pos_integral = 0; // 【追加】
-    _pid_states[id].pos_prev_err = 0; // 【追加】
+    _pid_states[id].pos_integral = 0;
+    _pid_states[id].pos_prev_err = 0;
     _data_mutex.unlock();
 }
 
@@ -62,7 +65,6 @@ void rbms::set_target_torque(int id, int torque) {
     _data_mutex.unlock();
 }
 
-// 【追加】目標角度のセッター
 void rbms::set_target_angle(int id, float angle) {
     if (id < 0 || id >= _motor_num) return;
     _data_mutex.lock();
@@ -94,6 +96,20 @@ void rbms::set_pos_pid_gains(float kp, float ki, float kd) {
     _data_mutex.unlock();
 }
 
+void rbms::set_speed_limit(int id, float max_speed) {
+    if (id < 0 || id >= _motor_num) return;
+    _data_mutex.lock();
+    _pid_states[id].speed_limit_rpm = max_speed;
+    _data_mutex.unlock();
+}
+
+void rbms::set_accel_limit(int id, float max_accel) {
+    if (id < 0 || id >= _motor_num) return;
+    _data_mutex.lock();
+    _pid_states[id].accel_limit_rpm_s = max_accel;
+    _data_mutex.unlock();
+}
+
 float rbms::pid_calculate(int id, float target, float current, float dt) {
     float error = target - current;
     _pid_states[id].integral += (error + _pid_states[id].prev_err) * dt / 2.0f;
@@ -111,11 +127,11 @@ float rbms::pid_calculate(int id, float target, float current, float dt) {
     return out;
 }
 
-float rbms::pos_pid_calculate(int id, float target, float current, float dt) {
+float rbms::pos_pid_calculate(int id, float target, float current, float dt, float limit) {
     float error = target - current;
     _pid_states[id].pos_integral += (error + _pid_states[id].pos_prev_err) * dt / 2.0f;
 
-    float integral_limit = 500.0f / (_ki_p > 0.0f ? _ki_p : 1.0f); 
+    float integral_limit = limit / (_ki_p > 0.0f ? _ki_p : 1.0f); 
     if (_pid_states[id].pos_integral > integral_limit) {
         _pid_states[id].pos_integral = integral_limit;
     } else if (_pid_states[id].pos_integral < -integral_limit) {
@@ -132,7 +148,6 @@ float rbms::pos_pid_calculate(int id, float target, float current, float dt) {
 void rbms::spd_control() {
     _thread.start(callback(this, &rbms::control_thread_entry));
 }
-
 void rbms::control_thread_entry() {
     while (true) {
         _event_flags.wait_any(0x01); 
@@ -157,10 +172,6 @@ void rbms::control_thread_entry() {
             _data_mutex.unlock();
 
             if (has_new) {
-                short rot, raw_spd;
-                parse_can_data(id, local_msg, &rot, &raw_spd);
-                
-                int final_out = 0;
                 float dt = _pid_states[id].timer.read();
                 _pid_states[id].timer.reset();                    
                 
@@ -170,24 +181,84 @@ void rbms::control_thread_entry() {
                     _pid_states[id].prev_err = 0.0f;
                     _pid_states[id].pos_integral = 0.0f;
                     _pid_states[id].pos_prev_err = 0.0f;
+                    _pid_states[id].current_target_rpm = 0.0f; 
                 }
 
-                float current_rpm = _motor_type ? (raw_spd / 19.0f) : (raw_spd / 36.0f);
+                short rot, raw_spd;
+                parse_can_data(id, local_msg, &rot, &raw_spd); 
+                
+                int final_out = 0;
+                float current_rpm = _motor_type ? (raw_spd / 19.2f) : (raw_spd / 36.0f);
+                
 
-                if (mode == POS_MODE) {
-                    float current_angle = _pid_states[id].accumulated_angle;
-                    float cascade_target_rpm = pos_pid_calculate(id, target_a, current_angle, dt);
+                if (mode == POS_MODE || mode == SPD_MODE) {
                     
-                    if (cascade_target_rpm > 500.0f) cascade_target_rpm = 500.0f;
-                    if (cascade_target_rpm < -500.0f) cascade_target_rpm = -500.0f;
+                    float limit = (_pid_states[id].speed_limit_rpm > 0.0f) ? 
+                                  _pid_states[id].speed_limit_rpm : 
+                                  ((mode == POS_MODE) ? 500.0f : 10000.0f);
 
-                    final_out = (int)pid_calculate(id, cascade_target_rpm, current_rpm, dt);
-                    // printf(">speed:%f\n",current_rpm);
-                    // printf(">pos:%f\n",current_angle);
-                } else if (mode == SPD_MODE) {
-                    final_out = (int)pid_calculate(id, (float)target_s, current_rpm, dt);
+                    float raw_target_rpm = 0.0f;
+                    bool bypass_accel_limit = false;
+
+                    if (mode == POS_MODE) {
+                        float current_angle = _pid_states[id].accumulated_angle;
+                        float error_angle = target_a - current_angle;
+                        float abs_error = std::fabs(error_angle);
+                        // printf(">speed:%f\n",current_rpm);
+                        // printf(">pos:%f\n",current_angle);
+                        // //printf(">dt:%f\n",dt);
+                        const float SETTLING_THRESHOLD = 25.0f; 
+                        const float DEAD_BAND = 2.5f;
+
+                        if (abs_error > SETTLING_THRESHOLD&&_pid_states[id].accel_limit_rpm_s > 0.0f) {
+                            _pid_states[id].pos_prev_err = error_angle; 
+                            _pid_states[id].pos_integral = 0.0f;
+                            float profile_rpm = limit;
+
+                            if (_pid_states[id].accel_limit_rpm_s > 0.0f) {
+                                float safe_accel = _pid_states[id].accel_limit_rpm_s * 0.85f; 
+                                float decel_limit = std::sqrt((safe_accel * abs_error) / 3.0f);
+                                if (profile_rpm > decel_limit) {
+                                    profile_rpm = decel_limit;
+                                }
+                            }
+
+                            if (error_angle < 0.0f) profile_rpm = -profile_rpm;
+                            raw_target_rpm = profile_rpm;
+
+                        } else if(abs_error > DEAD_BAND){
+                            raw_target_rpm = pos_pid_calculate(id, target_a, current_angle, dt, limit);
+                            bypass_accel_limit = true; 
+                        }else{
+                            _pid_states[id].pos_prev_err = 0.0f; 
+                            _pid_states[id].pos_integral = 0.0f; 
+                            raw_target_rpm = 0.0f; 
+                            bypass_accel_limit = true;
+                        }
+                    } else {
+                        raw_target_rpm = (float)target_s;
+                    }
+                    if (raw_target_rpm > limit) raw_target_rpm = limit;
+                    if (raw_target_rpm < -limit) raw_target_rpm = -limit;
+                    if (_pid_states[id].accel_limit_rpm_s > 0.0f && !bypass_accel_limit) {
+                        float max_delta = _pid_states[id].accel_limit_rpm_s * dt;
+                        
+                        if (raw_target_rpm > _pid_states[id].current_target_rpm + max_delta) {
+                            _pid_states[id].current_target_rpm += max_delta;
+                        } else if (raw_target_rpm < _pid_states[id].current_target_rpm - max_delta) {
+                            _pid_states[id].current_target_rpm -= max_delta;
+                        } else {
+                            _pid_states[id].current_target_rpm = raw_target_rpm;
+                        }
+                    } else {
+                        _pid_states[id].current_target_rpm = raw_target_rpm;
+                    }
+                    //printf(">speed_set:%f\n",raw_target_rpm);
+                    final_out = (int)pid_calculate(id, _pid_states[id].current_target_rpm, current_rpm, dt);
+
                 } else {
                     final_out = target_t;
+                    _pid_states[id].current_target_rpm = current_rpm;
                 }
 
                 if (final_out > _motor_max) final_out = _motor_max;
